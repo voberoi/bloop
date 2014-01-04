@@ -1,31 +1,36 @@
 #!/usr/bin/env ruby
 
 require 'terminfo'
+require 'curses'
 
 class Bloop
     SMILEY = "\u263a".encode("utf-8")
 
     def initialize
-        @model = BloopModel.new
+        @view = BloopView.new
+        @model = BloopModel.new(view.width)
         @previous_render_time = 0
         @milliseconds_between_frames = 50
     end
 
     def run!
-        clear_screen
-
-        loop do
-            if time_to_render?
-                update_render_time
-                model.tick
-                render
+        begin
+            view.setup
+            loop do
+                if time_to_render?
+                    update_render_time
+                    model.tick(view.width)
+                    render
+                end
             end
+        ensure
+            view.teardown
         end
     end
 
     private
 
-    attr_reader :model
+    attr_reader :model, :view
 
     def time_to_render?
         elapsed = milliseconds_since_epoch - @previous_render_time
@@ -37,44 +42,67 @@ class Bloop
     end
 
     def render
-        puts left_of_smiley + SMILEY
-    end
-
-    def left_of_smiley
-        " " * model.width_left_of_smiley
+        view.set_position(model.smiley_position, 50)
+        view.add_string(SMILEY)
+        view.redraw_view
     end
 
     def milliseconds_since_epoch
         (Time.now.to_f * 1000).truncate
     end
+end
 
-    def clear_screen
-        puts "\e[H\e[2J"
+class BloopView
+    include Curses
+
+    def width
+        cols
+    end
+
+    def set_position(x, y)
+        setpos(x, y)
+    end
+
+    def add_string(string)
+        addstr(string)
+    end
+
+    def redraw_view
+        refresh
+    end
+
+    def setup
+        init_screen
+        cbreak
+        noecho
+    end
+
+    def teardown
+        close_screen
+        nocbreak
+        echo
     end
 end
 
 class BloopModel
     attr_reader :smiley_position
-    attr_reader :width
 
-    def initialize
-        set_current_width
+    def initialize(width)
+        @width = width
         @smiley_position = random_position
         @velocity = random_velocity
     end
 
-    def tick
-        set_current_width
+    def tick(width)
+        @width = width
         reverse_direction if collision_detected?
         move_smiley
     end
 
-    def width_left_of_smiley
-        smiley_position
-    end
-
 
     private
+
+    attr_reader :width
 
     def move_smiley
         @smiley_position += @velocity
@@ -118,20 +146,12 @@ class BloopModel
     end
     alias_method :out_of_right_bounds?, :right_collision_detected?
 
-    def set_current_width
-        @width = terminal_width
-    end
-
     def random_position
-        rand(0..terminal_width)
+        rand(0..width)
     end
 
     def random_velocity
         [-3, 3].sample
-    end
-
-    def terminal_width
-        TermInfo.screen_size[1]
     end
 end
 
